@@ -1,0 +1,18 @@
+{
+  "closetItems": [
+    {"id": "shirt_01", "category": "top", "color": "white", "description": "White collared shirt"},
+    {"id": "pants_01", "category": "bottoms", "color": "black", "description": "Black straight-leg trousers"},
+    {"id": "shoes_01", "category": "shoes", "color": "black", "description": "Flat black loafers"}
+  ],
+  "candidate": {
+    "id": "candidate_01", "category": "outerwear", "color": "navy", "description": "Navy jacket"
+  },
+  "preferences": {
+    "style": "classic",
+    "occasion": "business casual",
+    "temperatureC": null,
+    "rain": null,
+    "notes": "No heels. Use my existing clothes with the candidate jacket.",
+    "excludedItemIds": []
+  }
+}
