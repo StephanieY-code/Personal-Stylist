@@ -1,18 +1,108 @@
 {
   "closetItems": [
-    {"id": "shirt_01", "category": "top", "color": "white", "description": "White collared shirt"},
-    {"id": "pants_01", "category": "bottoms", "color": "black", "description": "Black straight-leg trousers"},
-    {"id": "shoes_01", "category": "shoes", "color": "black", "description": "Flat black loafers"}
+    {
+      "id": "top_01",
+      "category": "top",
+      "color": "white",
+      "description": "Plain white crew-neck T-shirt with short sleeves"
+    },
+    {
+      "id": "top_02",
+      "category": "top",
+      "color": "light blue",
+      "description": "Light blue long-sleeved button-down shirt with a collar"
+    },
+    {
+      "id": "top_03",
+      "category": "top",
+      "color": "black",
+      "description": "Black fitted long-sleeved turtleneck"
+    },
+    {
+      "id": "top_04",
+      "category": "top",
+      "color": "cream",
+      "description": "Cream cable-knit sweater with a relaxed silhouette"
+    },
+    {
+      "id": "top_05",
+      "category": "top",
+      "color": "red and white",
+      "description": "Red and white striped short-sleeved T-shirt"
+    },
+    {
+      "id": "bottoms_01",
+      "category": "bottoms",
+      "color": "dark blue",
+      "description": "Dark blue straight-leg jeans without visible distressing"
+    },
+    {
+      "id": "bottoms_02",
+      "category": "bottoms",
+      "color": "black",
+      "description": "Black tailored ankle-length trousers"
+    },
+    {
+      "id": "bottoms_03",
+      "category": "bottoms",
+      "color": "beige",
+      "description": "Beige wide-leg trousers with a high waist"
+    },
+    {
+      "id": "bottoms_04",
+      "category": "bottoms",
+      "color": "olive green",
+      "description": "Olive green cargo trousers with large side pockets"
+    },
+    {
+      "id": "dress_01",
+      "category": "dress",
+      "color": "black",
+      "description": "Plain black sleeveless midi dress with a straight silhouette"
+    },
+    {
+      "id": "outerwear_01",
+      "category": "outerwear",
+      "color": "light blue",
+      "description": "Light blue cropped denim jacket with metal buttons"
+    },
+    {
+      "id": "shoes_01",
+      "category": "shoes",
+      "color": "white",
+      "description": "White low-top sneakers with flat soles"
+    },
+    {
+      "id": "shoes_02",
+      "category": "shoes",
+      "color": "black",
+      "description": "Black flat loafers with a minimal design"
+    },
+    {
+      "id": "shoes_03",
+      "category": "shoes",
+      "color": "black",
+      "description": "Black ankle boots with a five-centimeter block heel"
+    },
+    {
+      "id": "accessory_01",
+      "category": "accessory",
+      "color": "brown",
+      "description": "Brown belt with a small gold-colored buckle"
+    }
   ],
   "candidate": {
-    "id": "candidate_01", "category": "outerwear", "color": "navy", "description": "Navy jacket"
+    "id": "candidate_01",
+    "category": "outerwear",
+    "color": "navy",
+    "description": "Navy single-breasted blazer with a relaxed silhouette and gold-colored buttons"
   },
   "preferences": {
-    "style": "classic",
-    "occasion": "business casual",
-    "temperatureC": null,
-    "rain": null,
-    "notes": "No heels. Use my existing clothes with the candidate jacket.",
-    "excludedItemIds": []
+    "style": "classic and minimal",
+    "occasion": "business casual networking event",
+    "temperatureC": 16,
+    "rain": false,
+    "notes": "Prefer flat shoes and comfortable outfits. Avoid combining multiple outer layers. Explain how each combination differs.",
+    "excludedItemIds": ["shoes_03"]
   }
 }

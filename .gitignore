@@ -21,3 +21,8 @@ build/
 
 # VS Code local settings
 .vscode/
+
+
+#DB
+wardrobe.db
+images/
