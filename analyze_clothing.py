@@ -50,10 +50,10 @@ def prepare_image(path: Path) -> bytes:
                     raise ValueError("Use a JPEG, PNG, WebP, or HEIC photo.")
                 if getattr(source, "n_frames", 1) != 1:
                     raise ValueError("Use a still photo, not an animation.")
-                source.draft("RGB", (1600, 1600))  # JPEG only: decode big photos at a smaller size
-                source.load()
+                # Shrink first (JPEG even decodes at the smaller size) so the
+                # full-size photo is freed before any other copy is made.
+                source.thumbnail((1600, 1600))
                 photo = ImageOps.exif_transpose(source).convert("RGB")
-                photo.thumbnail((1600, 1600))
                 output = io.BytesIO()
                 photo.save(output, format="JPEG", quality=90)
                 return output.getvalue()
@@ -78,13 +78,18 @@ def validate_result(result):
     return result
 
 
-def analyze_clothing(path: Path, key: str, model: str) -> dict:
-    """The function we can later call from FastAPI after this script works."""
+def analyze_clothing(path: Path, key: str, model: str, photo: bytes | None = None) -> dict:
+    """Describe the garment in a photo.
+
+    Pass photo (the output of prepare_image) when you already have it,
+    so the photo is not decoded a second time.
+    """
     if not key:
         raise ValueError("Add GEMINI_API_KEY to .env beside this script.")
     if not re.fullmatch(r"[A-Za-z0-9._-]+", model):
         raise ValueError("Set GEMINI_TEXT_MODEL to a bare model name in .env, e.g. gemini-3.8-flash.")
-    photo = prepare_image(path)
+    if photo is None:
+        photo = prepare_image(path)
     body = {
         "contents": [{"parts": [
             {"text": PROMPT},
@@ -93,6 +98,10 @@ def analyze_clothing(path: Path, key: str, model: str) -> dict:
         ]}],
         "generationConfig": {"responseMimeType": "application/json"},
     }
+    if not model.startswith("gemini-2"):
+        # Describing one garment needs little reasoning; "low" halves the wait.
+        # (Gemini 2.x models do not accept thinkingLevel.)
+        body["generationConfig"]["thinkingConfig"] = {"thinkingLevel": "low"}
     try:
         response = httpx.post(
             f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",

@@ -110,9 +110,10 @@ def add_item(category, color, description, owned=True, image_bytes=None, item_id
 
 def add_from_photo(photo: Path, key, model, owned=True):
     """Gemini describes the photo, then the item and a cleaned copy of the photo are saved."""
-    result = analyze_clothing(photo, key, model)
+    image_bytes = prepare_image(photo)
+    result = analyze_clothing(photo, key, model, photo=image_bytes)
     item = add_item(result["category"], result["color"], result["description"],
-                    owned=owned, image_bytes=prepare_image(photo))
+                    owned=owned, image_bytes=image_bytes)
     item["uncertainties"] = result["uncertainties"]  # shown to the user, not stored
     return item
 

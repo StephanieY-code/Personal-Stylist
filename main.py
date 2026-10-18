@@ -66,15 +66,23 @@ PARALLEL_ANALYSES = 5
 DEFAULT_STYLE = "simple, comfortable and put-together"
 
 UPLOAD_LOCK = Lock()
+DECODE_LOCK = Lock()
 
 
 # ---------- Helper functions ----------
 
+def shrink_photo(path):
+    # One photo at a time: a full-size phone photo needs ~150 MB while it is
+    # decoded, too much to do 5 at once on a small (512 MB) server.
+    with DECODE_LOCK:
+        return prepare_image(path)
+
+
 def add_photo(path, key, model):
     # The slow Gemini call runs in parallel; only the save is serialized
     # because the database chooses the next available clothing ID.
-    result = analyze_clothing(path, key, model)
-    image_bytes = prepare_image(path)
+    image_bytes = shrink_photo(path)
+    result = analyze_clothing(path, key, model, photo=image_bytes)
     with UPLOAD_LOCK:
         item = database.add_item(
             result["category"], result["color"], result["description"],
@@ -769,14 +777,15 @@ async def buy_or_bye(
             path = Path(tmp) / "photo"
             path.write_bytes(data)
 
+            # Also the JPEG copy for the results page: browsers cannot show HEIC photos.
+            photo = await run_in_threadpool(shrink_photo, path)
             item = await run_in_threadpool(
                 analyze_clothing,
                 path,
                 env("GEMINI_API_KEY"),
                 env("GEMINI_TEXT_MODEL"),
+                photo,
             )
-            # A JPEG copy for the results page: browsers cannot show HEIC photos.
-            photo = await run_in_threadpool(prepare_image, path)
 
         candidate = {
             "id": "candidate_check",

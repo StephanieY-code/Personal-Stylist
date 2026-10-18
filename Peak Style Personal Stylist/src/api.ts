@@ -59,12 +59,18 @@ function apiErrorMessage(payload: unknown, fallback: string) {
   return fallback
 }
 
+// The ./start.sh hint only makes sense on your own computer, not on the live site.
+const isLocal = ["localhost", "127.0.0.1"].includes(window.location.hostname)
+const START_HINT = isLocal
+  ? "Make sure the backend is running (./start.sh)."
+  : "Please try again in a minute."
+
 export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response
   try {
     response = await fetch(`${API_BASE}${path}`, init)
   } catch {
-    throw new Error("Can't reach your stylist. Make sure the backend is running (./start.sh).")
+    throw new Error(`Can't reach your stylist. ${START_HINT}`)
   }
   let payload: unknown
 
@@ -75,7 +81,7 @@ export async function apiRequest<T>(path: string, init?: RequestInit): Promise<T
     throw new Error(
       response.ok
         ? "The backend returned an invalid response."
-        : `The backend request failed (${response.status}). Make sure it is running (./start.sh).`,
+        : `The backend request failed (${response.status}). ${START_HINT}`,
     )
   }
 
