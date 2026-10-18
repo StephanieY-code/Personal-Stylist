@@ -3,4 +3,5 @@ uvicorn[standard]
 httpx[socks]
 python-dotenv
 Pillow
-python-multipartpillow-heif
+python-multipart
+pillow-heif
