@@ -575,14 +575,7 @@ function StyleProfile() {
         },
       )
       setCurrentStyle(result.style)
-      setStatus({
-        kind: "success",
-        message: `${result.message} Taking you to today’s outfit…`,
-      })
-      // Show the confirmation for a moment, then open the Today's outfit form.
-      window.setTimeout(() => {
-        window.location.assign("?view=outfit")
-      }, 1200)
+      setStatus({ kind: "success", message: "Style saved ✓" })
     } catch (error) {
       setStatus({
         kind: "error",
@@ -597,7 +590,7 @@ function StyleProfile() {
     setOwnWords("")
     setStatus({
       kind: "success",
-      message: "Saved from your chat with the peacock. Today’s outfit will follow it.",
+      message: "Style saved ✓",
     })
   }
 
@@ -643,14 +636,12 @@ function StyleProfile() {
         <button type="submit" disabled={status.kind === "loading"}>
           Create my style profile
         </button>
-        {status.kind === "success" && (
-          <a className="next-link" href="?view=outfit">
-            Style today’s outfit <ArrowIcon />
-          </a>
-        )}
+        {/* Right under the button, so the confirmation is always in view. */}
+        <StatusLine status={status} />
+        <a className="next-link" href="?view=outfit">
+          Style today’s outfit <ArrowIcon />
+        </a>
       </form>
-
-      <StatusLine status={status} />
     </>
   )
 }
