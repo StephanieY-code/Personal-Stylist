@@ -781,3 +781,17 @@ app.mount(
     StaticFiles(directory=PREVIEW_DIR),
     name="previews",
 )
+
+# ---------- Website ----------
+
+# When the frontend has been built (render-build.sh does this on Render),
+# serve it at "/" so one service hosts both the website and the API.
+# Mounted last so the /api routes above always win.
+FRONTEND_DIR = HERE / "Peak Style Personal Stylist" / "dist"
+
+if FRONTEND_DIR.is_dir():
+    app.mount(
+        "/",
+        StaticFiles(directory=FRONTEND_DIR, html=True),
+        name="website",
+    )
