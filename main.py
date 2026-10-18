@@ -14,14 +14,16 @@ Required .env settings:
 
 Optional:
     DEFAULT_CITY=Seattle
+    CORS_ORIGINS=http://localhost:8443
 """
 
+import asyncio
 import os
 import tempfile
 import uuid
 from pathlib import Path
 from threading import Lock
-from typing import Optional
+from typing import Literal, Optional
 from urllib.parse import quote
 
 from dotenv import load_dotenv
@@ -31,7 +33,6 @@ from fastapi import (
     File,
     Form,
     HTTPException,
-    Request,
     UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,9 +42,11 @@ from starlette.concurrency import run_in_threadpool
 
 import database
 from analyze_clothing import analyze_clothing
-from generate_preview import MAX_CLOTHING_PHOTOS, generate_preview
+from generate_preview import generate_look
 from get_weather import get_weather
 from recommend_clothing import recommend_clothing
+from review_purchase import review_purchase
+from style_chat import style_chat
 from today_outfit import today_outfit
 
 
@@ -52,7 +55,6 @@ PREVIEW_DIR = HERE / "previews"
 
 load_dotenv(HERE / ".env", override=True)
 
-MAX_PHOTO_BYTES = 5 * 1024 * 1024
 MAX_PHOTOS_PER_UPLOAD = 10
 DEFAULT_STYLE = "simple, comfortable and put-together"
 
@@ -88,12 +90,9 @@ def fail(exc):
 
 async def read_photo(upload: UploadFile) -> bytes:
     try:
-        data = await upload.read(MAX_PHOTO_BYTES + 1)
+        data = await upload.read()
     finally:
         await upload.close()
-
-    if len(data) > MAX_PHOTO_BYTES:
-        raise ValueError("Use a photo smaller than 5 MB.")
 
     if not data:
         raise ValueError("The photo is empty.")
@@ -117,8 +116,12 @@ def saved_image_path(item):
     return path
 
 
-def with_image_url(item, request: Request):
-    """Add an image URL that the frontend can display."""
+def with_image_url(item):
+    """Add an image URL that the frontend can display.
+
+    The URL is relative (/api/images/...) so it also works through the
+    frontend's /api proxy when the site is opened from another device.
+    """
     item = dict(item)
     path = saved_image_path(item)
 
@@ -127,11 +130,7 @@ def with_image_url(item, request: Request):
             database.IMAGE_DIR.resolve()
         ).as_posix()
 
-        item["imageUrl"] = (
-            str(request.base_url).rstrip("/")
-            + "/api/images/"
-            + quote(relative_path)
-        )
+        item["imageUrl"] = "/api/images/" + quote(relative_path)
     else:
         item["imageUrl"] = None
 
@@ -163,7 +162,7 @@ def weather_for(city):
         return None, redact(str(exc))
 
 
-def preferences(occasion, weather, notes=""):
+def preferences(occasion, weather, notes="", mood=""):
     prefs = {
         "style": database.get_setting("style", DEFAULT_STYLE),
         "occasion": occasion,
@@ -172,6 +171,9 @@ def preferences(occasion, weather, notes=""):
         "notes": notes,
         "excludedItemIds": [],
     }
+
+    if mood:
+        prefs["mood"] = mood
 
     if weather:
         prefs["notes"] = (
@@ -187,13 +189,71 @@ def describe(items):
     return " + ".join(item["description"] for item in items)
 
 
+def outfit_pieces(item_ids):
+    """Look up clothing IDs for the image model.
+
+    Returns the items and, for each one, its description plus its photo
+    path (None when it has no photo, so it is drawn from the description).
+    """
+    items = []
+
+    # Remove duplicate IDs while preserving order.
+    for item_id in dict.fromkeys(item_ids):
+        item = database.get_item(item_id)
+
+        if not item:
+            raise HTTPException(404, f"No item with ID {item_id}.")
+
+        items.append(item)
+
+    if not items:
+        raise HTTPException(400, "Choose at least one clothing item.")
+
+    pieces = [
+        {"description": item["description"], "photo": saved_image_path(item)}
+        for item in items
+    ]
+    return items, pieces
+
+
+def save_generated(image, mime):
+    """Save a generated image in previews/ and return its URL."""
+    extensions = {
+        "image/jpeg": ".jpg",
+        "image/png": ".png",
+        "image/webp": ".webp",
+    }
+
+    if mime not in extensions or not image:
+        raise HTTPException(
+            502,
+            "The image service did not return a supported image.",
+        )
+
+    name = f"{uuid.uuid4().hex}{extensions[mime]}"
+
+    PREVIEW_DIR.mkdir(exist_ok=True)
+    (PREVIEW_DIR / name).write_bytes(image)
+
+    return "/api/previews/" + name
+
+
 # ---------- App setup ----------
 
 app = FastAPI(title="Peak Style API")
+cors_origins = [
+    origin.strip().rstrip("/")
+    for origin in env(
+        "CORS_ORIGINS",
+        "http://localhost:5173,http://127.0.0.1:5173,"
+        "http://localhost:8443,http://127.0.0.1:8443",
+    ).split(",")
+    if origin.strip()
+]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -220,7 +280,6 @@ def health():
 
 @api.post("/closet/upload")
 async def upload_closet(
-    request: Request,
     items: list[UploadFile] = File(
         ...,
         description="Choose clothing photos",
@@ -257,7 +316,7 @@ async def upload_closet(
                     env("GEMINI_TEXT_MODEL"),
                 )
 
-            added.append(with_image_url(item, request))
+            added.append(with_image_url(item))
 
         except (ValueError, RuntimeError) as exc:
             skipped.append({
@@ -290,10 +349,10 @@ async def upload_closet(
 
 
 @api.get("/closet")
-def get_closet(request: Request):
+def get_closet():
     return {
         "items": [
-            with_image_url(item, request)
+            with_image_url(item)
             for item in database.list_items(owned=True)
         ]
     }
@@ -311,12 +370,12 @@ def delete_closet_item(item_id: str):
 
 @api.get("/outfit/today")
 def outfit_today(
-    request: Request,
     city: Optional[str] = None,
     occasion: str = "everyday",
+    mood: str = "",
     photosOnly: bool = False,
 ):
-    """Recommend an outfit using the closet and local weather.
+    """Recommend an outfit using the closet, local weather and your mood.
 
     Set photosOnly=true to choose only items with available photos.
     """
@@ -337,7 +396,7 @@ def outfit_today(
     try:
         result = today_outfit(
             closet,
-            preferences(occasion[:200], weather),
+            preferences(occasion[:200], weather, mood=mood[:100]),
             env("GEMINI_API_KEY"),
             env("GEMINI_TEXT_MODEL"),
         )
@@ -345,7 +404,7 @@ def outfit_today(
         raise fail(exc)
 
     items = [
-        with_image_url(database.get_item(item_id), request)
+        with_image_url(database.get_item(item_id))
         for item_id in result["itemIds"]
     ]
 
@@ -364,11 +423,62 @@ def outfit_today(
     }
 
 
-# ---------- Outfit preview ----------
+# ---------- Outfit images ----------
+
+LOOK_MESSAGE = (
+    "Here's your look. It's AI-generated, "
+    "so the real clothes may look a little different."
+)
+
+
+class LookRequest(BaseModel):
+    itemIds: list[str] = Field(..., min_length=1, max_length=8)
+    occasion: str = Field("", max_length=200)
+    mood: str = Field("", max_length=100)
+    temperatureC: Optional[float] = Field(None, ge=-60, le=60)
+    chanceOfRain: Optional[int] = Field(None, ge=0, le=100)
+
+
+@api.post("/outfit/look")
+async def outfit_look(body: LookRequest):
+    """Generate a photo of an AI fashion model wearing the chosen items.
+
+    Items without a photo are drawn from their text description.
+    """
+    items, pieces = outfit_pieces(body.itemIds)
+
+    context = []
+    if body.occasion.strip():
+        context.append(f"Occasion: {body.occasion.strip()}.")
+    if body.mood.strip():
+        context.append(f"Mood: {body.mood.strip()}.")
+    if body.temperatureC is not None:
+        weather = f"Weather: about {round(body.temperatureC)}°C"
+        if body.chanceOfRain is not None:
+            weather += f" with a {body.chanceOfRain}% chance of rain"
+        context.append(weather + ".")
+
+    try:
+        image, mime = await run_in_threadpool(
+            generate_look,
+            pieces,
+            env("GEMINI_API_KEY"),
+            env("GEMINI_IMAGE_MODEL"),
+            None,
+            " ".join(context),
+        )
+    except (ValueError, RuntimeError) as exc:
+        raise fail(exc)
+
+    return {
+        "message": LOOK_MESSAGE,
+        "imageUrl": save_generated(image, mime),
+        "items": [with_image_url(item) for item in items],
+    }
+
 
 @api.post("/outfit/preview")
 async def outfit_preview(
-    request: Request,
     person: UploadFile = File(
         ...,
         description="Photo of the person; full body works best",
@@ -382,46 +492,16 @@ async def outfit_preview(
     ),
     notes: str = Form("", max_length=500),
 ):
-    """Generate a try-on image from a person photo and clothing photos.
+    """Generate a try-on image of the person in the photo wearing the items.
 
     The person photo is stored temporarily for this request.
+    Items without a photo are drawn from their text description.
     """
-    ids = [
+    items, pieces = outfit_pieces(
         item_id.strip()
         for item_id in itemIds.split(",")
         if item_id.strip()
-    ]
-
-    if not ids:
-        raise HTTPException(400, "Choose at least one clothing item.")
-
-    with_photo = []
-    without_photo = []
-
-    # Remove duplicate IDs while preserving order.
-    for item_id in dict.fromkeys(ids):
-        item = database.get_item(item_id)
-
-        if not item:
-            raise HTTPException(404, f"No item with ID {item_id}.")
-
-        if saved_image_path(item):
-            with_photo.append(item)
-        else:
-            without_photo.append(item)
-
-    if not with_photo:
-        raise HTTPException(
-            400,
-            "None of these items has an available photo. "
-            "Upload photos or restore the missing files in images/.",
-        )
-
-    if len(with_photo) > MAX_CLOTHING_PHOTOS:
-        raise HTTPException(
-            400,
-            f"Choose at most {MAX_CLOTHING_PHOTOS} items with photos.",
-        )
+    )
 
     try:
         data = await read_photo(person)
@@ -431,11 +511,11 @@ async def outfit_preview(
             person_path.write_bytes(data)
 
             image, mime = await run_in_threadpool(
-                generate_preview,
-                person_path,
-                [saved_image_path(item) for item in with_photo],
+                generate_look,
+                pieces,
                 env("GEMINI_API_KEY"),
                 env("GEMINI_IMAGE_MODEL"),
+                person_path,
                 notes,
             )
 
@@ -449,50 +529,10 @@ async def outfit_preview(
     except (ValueError, RuntimeError) as exc:
         raise fail(exc)
 
-    extensions = {
-        "image/jpeg": ".jpg",
-        "image/png": ".png",
-        "image/webp": ".webp",
-    }
-
-    if mime not in extensions or not image:
-        raise HTTPException(
-            502,
-            "The image service did not return a supported image.",
-        )
-
-    name = f"{uuid.uuid4().hex}{extensions[mime]}"
-
-    PREVIEW_DIR.mkdir(exist_ok=True)
-    (PREVIEW_DIR / name).write_bytes(image)
-
-    message = (
-        "Here's your preview. It's AI-generated, "
-        "so the real clothes may look a little different."
-    )
-
-    if without_photo:
-        message += (
-            " Not shown (photo missing or not uploaded): "
-            + ", ".join(item["description"] for item in without_photo)
-            + "."
-        )
-
     return {
-        "message": message,
-        "imageUrl": (
-            str(request.base_url).rstrip("/")
-            + "/api/previews/"
-            + name
-        ),
-        "usedItems": [
-            with_image_url(item, request)
-            for item in with_photo
-        ],
-        "skippedItems": [
-            item["id"]
-            for item in without_photo
-        ],
+        "message": LOOK_MESSAGE,
+        "imageUrl": save_generated(image, mime),
+        "usedItems": [with_image_url(item) for item in items],
     }
 
 
@@ -555,6 +595,36 @@ def get_style(preference: Optional[str] = None):
         "style": database.get_setting("style", DEFAULT_STYLE)
     }
 
+# ---------- Style chat ----------
+
+class ChatMessage(BaseModel):
+    role: Literal["user", "stylist"]
+    text: str = Field(..., min_length=1, max_length=2000)
+
+
+class ChatRequest(BaseModel):
+    messages: list[ChatMessage] = Field(..., min_length=1, max_length=40)
+
+
+@api.post("/style-chat")
+async def chat_with_stylist(body: ChatRequest):
+    """Ask the Peak Style peacock a style question.
+
+    Send the whole conversation, oldest first, ending with your message.
+    """
+    try:
+        return await run_in_threadpool(
+            style_chat,
+            [message.model_dump() for message in body.messages],
+            database.get_setting("style", DEFAULT_STYLE),
+            owned_closet(),
+            env("GEMINI_API_KEY"),
+            env("GEMINI_TEXT_MODEL"),
+        )
+    except (ValueError, RuntimeError) as exc:
+        raise fail(exc)
+
+
 # ---------- Buy or Bye ----------
 
 @api.post("/analyze")
@@ -607,15 +677,59 @@ async def buy_or_bye(
             ),
         }
 
-        result = await run_in_threadpool(
-            recommend_clothing,
-            wardrobe,
-            env("GEMINI_API_KEY"),
-            env("GEMINI_TEXT_MODEL"),
+        style = database.get_setting("style", DEFAULT_STYLE)
+
+        # Find outfits and review the style fit at the same time.
+        result, review = await asyncio.gather(
+            run_in_threadpool(
+                recommend_clothing,
+                wardrobe,
+                env("GEMINI_API_KEY"),
+                env("GEMINI_TEXT_MODEL"),
+            ),
+            run_in_threadpool(
+                review_purchase,
+                {key: item[key] for key in ("category", "color", "description")},
+                closet,
+                style,
+                env("GEMINI_API_KEY"),
+                env("GEMINI_TEXT_MODEL"),
+            ),
+            return_exceptions=True,
         )
+
+        if isinstance(result, BaseException):
+            raise result
 
     except (ValueError, RuntimeError) as exc:
         raise fail(exc)
+
+    # The outfits still work if only the style review failed.
+    if isinstance(review, (ValueError, RuntimeError)):
+        review = None
+    elif isinstance(review, BaseException):
+        raise review
+
+    style_review = None
+
+    if review:
+        style_review = {
+            "styleMatch": review["styleMatch"],
+            "styleComment": review["styleComment"],
+            "similarComment": review["similarComment"],
+            "similarItems": [
+                with_image_url(database.get_item(item_id))
+                for item_id in review["similarItemIds"]
+            ],
+        }
+
+    # Add the closet pieces of each outfit so the frontend can show them.
+    for outfit in result["outfits"]:
+        outfit["items"] = [
+            with_image_url(database.get_item(item_id))
+            for item_id in outfit["itemIds"]
+            if item_id != candidate["id"]
+        ]
 
     count = len(result["outfits"])
 
@@ -645,6 +759,8 @@ async def buy_or_bye(
         "message": message,
         "item": item,
         "outfits": result["outfits"],
+        "style": style,
+        "styleReview": style_review,
     }
 
 

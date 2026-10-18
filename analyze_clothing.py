@@ -20,7 +20,8 @@ import httpx
 from dotenv import load_dotenv
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-Image.MAX_IMAGE_PIXELS = 20_000_000
+# High enough for any phone camera (e.g. 48 MP), still blocks absurd "decompression bomb" files.
+Image.MAX_IMAGE_PIXELS = 200_000_000
 CATEGORIES = {"top", "bottoms", "outerwear", "dress", "shoes", "accessory", "unknown"}
 PROMPT = """Describe the single main clothing item in this photograph.
 Return only a JSON object with exactly these fields:
@@ -39,8 +40,6 @@ def prepare_image(path: Path) -> bytes:
     """Verify photo, reduce size, and remove original metadata before upload."""
     if not path.is_file():
         raise ValueError(f"Photo not found: {path}. Put it beside the script or pass its full path.")
-    if path.stat().st_size > 5 * 1024 * 1024:
-        raise ValueError("Use a photo smaller than 5 MiB.")
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
@@ -49,6 +48,7 @@ def prepare_image(path: Path) -> bytes:
                     raise ValueError("Use a JPEG, PNG, or WebP photo. Convert HEIC first.")
                 if getattr(source, "n_frames", 1) != 1:
                     raise ValueError("Use a still photo, not an animation.")
+                source.draft("RGB", (1600, 1600))  # JPEG only: decode big photos at a smaller size
                 source.load()
                 photo = ImageOps.exif_transpose(source).convert("RGB")
                 photo.thumbnail((1600, 1600))
@@ -57,7 +57,7 @@ def prepare_image(path: Path) -> bytes:
                 return output.getvalue()
     except (UnidentifiedImageError, OSError, Image.DecompressionBombError,
             Image.DecompressionBombWarning) as exc:
-        raise ValueError("Cannot read this photo. Use a valid image under 20 megapixels.") from exc
+        raise ValueError("Cannot read this photo. Use a valid image under 200 megapixels.") from exc
 
 
 def validate_result(result):

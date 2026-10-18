@@ -19,3 +19,6 @@ previews/
 /preview.jpg
 
 .DS_Store
+# Frontend packages and build output
+node_modules/
+dist/
