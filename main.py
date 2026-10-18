@@ -19,11 +19,13 @@ Optional:
 
 import asyncio
 import base64
+import ctypes
 import hashlib
 import json
 import os
 import tempfile
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Lock
 from typing import Literal, Optional
@@ -66,16 +68,40 @@ PARALLEL_ANALYSES = 5
 DEFAULT_STYLE = "simple, comfortable and put-together"
 
 UPLOAD_LOCK = Lock()
-DECODE_LOCK = Lock()
+
+
+def linux_libc():
+    """On Linux (e.g. Render), stop memory piling up across threads.
+
+    glibc gives each thread its own memory pool and keeps freed memory in it.
+    After a few ~100 MB photo decodes on different threads, a 512 MB server
+    runs out of memory and crashes (Render shows 502). Returns None elsewhere.
+    """
+    try:
+        libc = ctypes.CDLL("libc.so.6")
+        libc.mallopt(-8, 2)  # M_ARENA_MAX: at most 2 memory pools
+        return libc
+    except (OSError, AttributeError):
+        return None  # macOS/Windows free memory differently
+
+
+LIBC = linux_libc()
+# Every photo is decoded on this one thread, so the same memory is reused
+# instead of each worker thread holding its own copy.
+DECODE_THREAD = ThreadPoolExecutor(max_workers=1, thread_name_prefix="decode")
 
 
 # ---------- Helper functions ----------
 
 def shrink_photo(path):
-    # One photo at a time: a full-size phone photo needs ~150 MB while it is
-    # decoded, too much to do 5 at once on a small (512 MB) server.
-    with DECODE_LOCK:
-        return prepare_image(path)
+    """Decode and shrink a photo, one at a time (~100 MB each for iPhone HEIC)."""
+    def decode():
+        try:
+            return prepare_image(path)
+        finally:
+            if LIBC:
+                LIBC.malloc_trim(0)  # hand the freed memory back to the system
+    return DECODE_THREAD.submit(decode).result()
 
 
 def add_photo(path, key, model):

@@ -19,9 +19,11 @@ import warnings
 import httpx
 from dotenv import load_dotenv
 from PIL import Image, ImageOps, UnidentifiedImageError
+import pillow_heif
 from pillow_heif import register_heif_opener
 
 register_heif_opener()  # read iPhone HEIC photos, even ones saved with a .jpg name
+pillow_heif.options.DECODE_THREADS = 1  # extra decode threads each hold their own memory
 # High enough for any phone camera (e.g. 48 MP), still blocks absurd "decompression bomb" files.
 Image.MAX_IMAGE_PIXELS = 200_000_000
 CATEGORIES = {"top", "bottoms", "outerwear", "dress", "shoes", "accessory", "unknown"}
