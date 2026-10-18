@@ -50,6 +50,15 @@ def connect():
     """)
     # Simple key/value settings, e.g. the user's style profile.
     conn.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    # Ratings and comments left on the feedback page.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS feedback (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            rating     INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
+            message    TEXT NOT NULL DEFAULT '',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
     return conn
 
 
@@ -106,6 +115,11 @@ def add_from_photo(photo: Path, key, model, owned=True):
                     owned=owned, image_bytes=prepare_image(photo))
     item["uncertainties"] = result["uncertainties"]  # shown to the user, not stored
     return item
+
+
+def add_feedback(rating, message=""):
+    with connect() as conn:
+        conn.execute("INSERT INTO feedback (rating, message) VALUES (?, ?)", (rating, message))
 
 
 def get_item(item_id):

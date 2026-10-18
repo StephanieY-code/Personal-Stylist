@@ -15,6 +15,10 @@ Use ONLY supplied item IDs, each at most once. Prefer a complete outfit
 Respect the style, occasion, mood and weather. Unknown weather is unknown.
 Do not invent garments, fabric properties, warmth, waterproofing or exact fit.
 Mention missing pieces or uncertain weather suitability in cautions.
+If preferences.previousOutfits lists outfits already shown, choose a noticeably different
+outfit: never repeat one of those exact combinations, and change the main pieces
+(top, bottoms or dress) when the closet allows. If no different reasonable outfit
+exists, reuse the closest one and say so in cautions.
 Return JSON only:
 {"itemIds":["top_01","bottoms_01"],"reason":"Why these pieces work today.","cautions":["Relevant uncertainty"]}
 The IDs in the example are placeholders; use actual input IDs.

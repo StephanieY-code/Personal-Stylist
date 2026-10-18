@@ -236,6 +236,82 @@ label {
 .garment-three { height: 52%; background: #a8d3d3; transition-delay: 260ms; }
 .is-open .garment { transform: translateY(0); }
 
+/* A garment holding a sample outfit: its pieces show as a little stack of photos. */
+.garment.has-outfit {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+  padding: 2.4em 0.6em 0.7em; /* em, not %: % would follow the closet's width */
+  border: 0;
+  font-family: inherit;
+  cursor: pointer;
+  transition: transform 700ms cubic-bezier(.2,.75,.25,1), box-shadow 180ms ease;
+}
+
+.garment.has-outfit:hover,
+.garment.has-outfit:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px #344784, 0 16px 34px rgb(42 66 103 / 26%);
+}
+
+.garment-pieces {
+  display: flex;
+  width: 100%;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.3em;
+}
+
+.garment-pieces > * {
+  display: grid;
+  width: 100%;
+  min-height: 0;
+  flex: 1 1 0;
+  place-items: center;
+  border-radius: 0.5em;
+  object-fit: cover;
+}
+
+.garment-pieces .piece-thumb {
+  width: 100%;
+  aspect-ratio: auto;
+  font-size: 1em;
+}
+
+.garment-label {
+  flex: none;
+}
+
+.garment.is-loading {
+  animation: look-breathe 2.6s ease-in-out infinite;
+}
+
+.sample-card {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr);
+  align-items: start;
+  gap: clamp(1.25rem, 3vw, 2rem);
+}
+
+.sample-card .look-details {
+  padding-right: 2.5rem; /* room for the close button */
+}
+
+.sample-card .verdict-close {
+  z-index: 1; /* stay above the look image on narrow screens */
+}
+
+.sample-card .look-details h1 {
+  font-size: clamp(2.2rem, 4vw, 3.2rem);
+}
+
+@media (max-width: 760px) {
+  .sample-card { grid-template-columns: 1fr; }
+  .sample-card .look-frame { width: min(100%, 15rem); justify-self: center; }
+  .sample-card .look-details { padding-right: 0; }
+}
+
 .closet-doors {
   z-index: 3;
   display: flex;
@@ -413,12 +489,20 @@ label {
   width: 3.5rem;
   aspect-ratio: 1;
   place-items: center;
+  padding: 3px; /* navy ring around the logo, like on the home page */
   border-radius: 50%;
-  color: white;
   background: #344784;
-  font-family: "Italiana", serif;
-  font-size: 1.1rem;
-  text-decoration: none;
+  box-shadow: 0 0.5rem 1.5rem rgb(52 71 132 / 18%);
+  transition: transform 180ms ease;
+}
+
+.brand-mark img {
+  display: block;
+  width: 100%;
+}
+
+.brand-mark:hover {
+  transform: rotate(-8deg) scale(1.05);
 }
 
 .back-link {
@@ -1353,6 +1437,10 @@ html {
   box-shadow: 0 0.75rem 2rem rgb(52 71 132 / 22%);
 }
 
+.verdict-dialog.sample-dialog {
+  width: min(58rem, calc(100% - 2rem));
+}
+
 .verdict-dialog {
   width: min(46rem, calc(100% - 2rem));
   max-height: calc(100dvh - 2rem);
@@ -1868,4 +1956,226 @@ img.verdict-piece {
   .chat-log { max-height: 22rem; }
   .chat-footer { grid-template-columns: 5rem minmax(0, 1fr); }
   .verdict-review { grid-template-columns: 1fr; }
+}
+
+/* ---------- Welcome art: logo, heart and peacock you can click ---------- */
+
+/* The stage copies the old "object-fit: cover" crop, so pieces placed in % of the
+   picture stay exactly on their spots at any screen size. */
+.hero {
+  container-type: size;
+}
+
+.hero-stage {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max(100cqw, calc(100cqh * 2142 / 1194));
+  aspect-ratio: 2142 / 1194;
+  transform: translate(-50%, -50%);
+}
+
+.hero-logo,
+.hero-heart,
+.hero-peacock {
+  position: absolute;
+  z-index: 1;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.hero-logo img,
+.hero-heart img,
+.hero-peacock img {
+  display: block;
+  width: 100%;
+  pointer-events: none;
+}
+
+.hero-logo:focus-visible,
+.hero-heart:focus-visible,
+.hero-peacock:focus-visible {
+  outline: 3px solid rgb(52 71 132 / 45%);
+  outline-offset: 4px;
+  border-radius: 1rem;
+}
+
+/* Logo: drifts down side to side like a feather, then the page moves to the closet. */
+.hero-logo {
+  top: -0.21%;
+  left: 0.44%;
+  width: 11.95%;
+  border-radius: 50%;
+  transition: transform 220ms ease;
+}
+
+.hero-logo.is-resting:hover {
+  transform: rotate(-8deg) scale(1.04);
+}
+
+.hero-logo.is-falling {
+  z-index: 3;
+  animation: feather-fall 1.5s cubic-bezier(.45,.05,.55,.95) forwards;
+}
+
+.hero-logo.is-returning {
+  animation: feather-return 700ms ease-out;
+}
+
+@keyframes feather-fall {
+  0%   { transform: translate(0, 0) rotate(0deg); }
+  15%  { transform: translate(55%, 55%) rotate(24deg); }
+  32%  { transform: translate(-10%, 120%) rotate(-20deg); }
+  50%  { transform: translate(70%, 195%) rotate(26deg); }
+  68%  { transform: translate(5%, 270%) rotate(-18deg); }
+  85%  { transform: translate(60%, 335%) rotate(14deg); opacity: 1; }
+  100% { transform: translate(35%, 375%) rotate(0deg); opacity: 0; }
+}
+
+@keyframes feather-return {
+  from { opacity: 0; transform: translateY(-30%) rotate(-12deg); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Heart: beats on hover and opens the feedback page. */
+.hero-heart {
+  top: 1.51%;
+  left: 91.32%;
+  width: 6.35%;
+}
+
+.hero-heart:hover,
+.hero-heart:focus-visible {
+  animation: heart-beat 900ms ease-in-out infinite;
+}
+
+@keyframes heart-beat {
+  0%, 60%, 100% { transform: scale(1); }
+  20% { transform: scale(1.14); }
+  40% { transform: scale(0.96); }
+}
+
+/* Peacock: tap to stand up tall (a crouch, a hop, then upright); tap again to sit. */
+.hero-peacock {
+  top: 47.4%;
+  left: 66.71%;
+  width: 20.63%;
+}
+
+.hero-peacock img {
+  transform-origin: 40% 100%;
+  transition: transform 500ms cubic-bezier(.3,1.4,.5,1);
+}
+
+.hero-peacock:not(.is-standing):hover img {
+  transform: rotate(3deg);
+}
+
+.hero-peacock.is-standing img {
+  animation: peacock-stand 900ms cubic-bezier(.3,1.2,.5,1) forwards;
+}
+
+@keyframes peacock-stand {
+  0%   { transform: none; }
+  25%  { transform: scale(1.06, 0.88); }
+  60%  { transform: translateY(-16%) rotate(14deg) scale(0.98, 1.1); }
+  100% { transform: translateY(-9%) rotate(12deg) scale(1, 1.08); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-logo.is-falling,
+  .hero-logo.is-returning,
+  .hero-heart:hover,
+  .hero-peacock.is-standing img { animation: none; }
+  .hero-peacock.is-standing img { transform: translateY(-9%) rotate(12deg) scale(1, 1.08); }
+}
+
+/* ---------- Feedback page ---------- */
+
+.feedback-form fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.feedback-form legend {
+  margin-bottom: 0.6rem;
+  color: #344784;
+  font-weight: 600;
+}
+
+.heart-rating {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.tool-form .heart-rating button {
+  min-height: 0;
+  padding: 0 0.1rem;
+  border-radius: 0.5rem;
+  color: #c9dfe2;
+  background: none;
+  font-size: clamp(2.4rem, 5vw, 3.2rem);
+  line-height: 1;
+  transition: color 150ms ease, transform 150ms ease;
+}
+
+.tool-form .heart-rating button:hover {
+  background: none;
+  transform: scale(1.12);
+}
+
+.tool-form .heart-rating button.is-on {
+  color: #e2667f;
+}
+
+.heart-rating svg,
+.feedback-thanks svg {
+  display: block;
+  width: 1em;
+  fill: currentColor;
+}
+
+.heart-rating-word {
+  min-height: 1.4em;
+  margin: 0.35rem 0 0;
+  color: #677083;
+  font-size: 0.9rem;
+}
+
+.own-words textarea {
+  padding: 0.85rem 1.1rem;
+  border: 1px solid #c1d5d7;
+  border-radius: 1rem;
+  color: #202643;
+  background: white;
+  font: inherit;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.own-words textarea:focus {
+  border-color: #344784;
+  box-shadow: 0 0 0 4px rgb(52 71 132 / 12%);
+}
+
+.own-words textarea::placeholder {
+  color: #9aa3b2;
+}
+
+.feedback-thanks {
+  display: flex;
+  justify-content: center;
+  gap: 0.4rem;
+  color: #c9dfe2;
+  font-size: clamp(2.6rem, 6vw, 4rem);
+}
+
+.feedback-thanks .is-on {
+  color: #e2667f;
+  animation: heart-beat 900ms ease-in-out 2;
 }

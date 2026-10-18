@@ -22,3 +22,4 @@ previews/
 # Frontend packages and build output
 node_modules/
 dist/
+backups/

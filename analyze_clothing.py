@@ -1,6 +1,6 @@
 """Analyze one garment photo without FastAPI.
 
-Install: python -m pip install "httpx[socks]" python-dotenv Pillow
+Install: python -m pip install "httpx[socks]" python-dotenv Pillow pillow-heif
 Run:     python analyze_clothing.py shirt.jpg
 Place .env next to this script with GEMINI_API_KEY and GEMINI_TEXT_MODEL.
 One run makes one real provider request; no automatic retries.
@@ -19,7 +19,9 @@ import warnings
 import httpx
 from dotenv import load_dotenv
 from PIL import Image, ImageOps, UnidentifiedImageError
+from pillow_heif import register_heif_opener
 
+register_heif_opener()  # read iPhone HEIC photos, even ones saved with a .jpg name
 # High enough for any phone camera (e.g. 48 MP), still blocks absurd "decompression bomb" files.
 Image.MAX_IMAGE_PIXELS = 200_000_000
 CATEGORIES = {"top", "bottoms", "outerwear", "dress", "shoes", "accessory", "unknown"}
@@ -44,8 +46,8 @@ def prepare_image(path: Path) -> bytes:
         with warnings.catch_warnings():
             warnings.simplefilter("error", Image.DecompressionBombWarning)
             with Image.open(path) as source:
-                if source.format not in {"JPEG", "PNG", "WEBP"}:
-                    raise ValueError("Use a JPEG, PNG, or WebP photo. Convert HEIC first.")
+                if source.format not in {"JPEG", "PNG", "WEBP", "HEIF"}:
+                    raise ValueError("Use a JPEG, PNG, WebP, or HEIC photo.")
                 if getattr(source, "n_frames", 1) != 1:
                     raise ValueError("Use a still photo, not an animation.")
                 source.draft("RGB", (1600, 1600))  # JPEG only: decode big photos at a smaller size

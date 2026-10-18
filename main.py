@@ -18,6 +18,9 @@ Optional:
 """
 
 import asyncio
+import base64
+import hashlib
+import json
 import os
 import tempfile
 import uuid
@@ -29,10 +32,12 @@ from urllib.parse import quote
 from dotenv import load_dotenv
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     FastAPI,
     File,
     Form,
     HTTPException,
+    Query,
     UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,7 +46,7 @@ from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 import database
-from analyze_clothing import analyze_clothing
+from analyze_clothing import analyze_clothing, prepare_image
 from generate_preview import generate_look
 from get_weather import get_weather
 from recommend_clothing import recommend_clothing
@@ -55,7 +60,9 @@ PREVIEW_DIR = HERE / "previews"
 
 load_dotenv(HERE / ".env", override=True)
 
-MAX_PHOTOS_PER_UPLOAD = 10
+MAX_PHOTOS_PER_UPLOAD = 20
+# How many photos Gemini analyzes at the same time during one upload.
+PARALLEL_ANALYSES = 5
 DEFAULT_STYLE = "simple, comfortable and put-together"
 
 UPLOAD_LOCK = Lock()
@@ -64,10 +71,17 @@ UPLOAD_LOCK = Lock()
 # ---------- Helper functions ----------
 
 def add_photo(path, key, model):
-    # Serialize uploads in this process because the database chooses
-    # the next available clothing ID.
+    # The slow Gemini call runs in parallel; only the save is serialized
+    # because the database chooses the next available clothing ID.
+    result = analyze_clothing(path, key, model)
+    image_bytes = prepare_image(path)
     with UPLOAD_LOCK:
-        return database.add_from_photo(path, key, model)
+        item = database.add_item(
+            result["category"], result["color"], result["description"],
+            image_bytes=image_bytes,
+        )
+    item["uncertainties"] = result["uncertainties"]  # shown to the user, not stored
+    return item
 
 
 def env(name, default=""):
@@ -280,6 +294,7 @@ def health():
 
 @api.post("/closet/upload")
 async def upload_closet(
+    background: BackgroundTasks,
     items: list[UploadFile] = File(
         ...,
         description="Choose clothing photos",
@@ -298,31 +313,36 @@ async def upload_closet(
             f"Upload at most {MAX_PHOTOS_PER_UPLOAD} photos at a time.",
         )
 
-    added = []
-    skipped = []
+    slots = asyncio.Semaphore(PARALLEL_ANALYSES)
 
-    for upload in items:
+    async def process(upload):
+        """Return ("added", item) or ("skipped", details) for one photo."""
         try:
             data = await read_photo(upload)
 
-            with tempfile.TemporaryDirectory() as tmp:
-                path = Path(tmp) / "photo"
-                path.write_bytes(data)
+            async with slots:
+                with tempfile.TemporaryDirectory() as tmp:
+                    path = Path(tmp) / "photo"
+                    path.write_bytes(data)
 
-                item = await run_in_threadpool(
-                    add_photo,
-                    path,
-                    env("GEMINI_API_KEY"),
-                    env("GEMINI_TEXT_MODEL"),
-                )
+                    item = await run_in_threadpool(
+                        add_photo,
+                        path,
+                        env("GEMINI_API_KEY"),
+                        env("GEMINI_TEXT_MODEL"),
+                    )
 
-            added.append(with_image_url(item))
+            return "added", with_image_url(item)
 
         except (ValueError, RuntimeError) as exc:
-            skipped.append({
+            return "skipped", {
                 "filename": upload.filename,
                 "error": redact(str(exc)),
-            })
+            }
+
+    results = await asyncio.gather(*(process(upload) for upload in items))
+    added = [value for kind, value in results if kind == "added"]
+    skipped = [value for kind, value in results if kind == "skipped"]
 
     if not added:
         raise HTTPException(
@@ -341,6 +361,7 @@ async def upload_closet(
     if skipped:
         message += f" Skipped {len(skipped)}."
 
+    background.add_task(outfit_samples)  # refresh the home page samples
     return {
         "message": message,
         "added": added,
@@ -359,10 +380,11 @@ def get_closet():
 
 
 @api.delete("/closet/{item_id}")
-def delete_closet_item(item_id: str):
+def delete_closet_item(item_id: str, background: BackgroundTasks):
     if not database.delete_item(item_id):
         raise HTTPException(404, "No such item.")
 
+    background.add_task(outfit_samples)  # refresh the home page samples
     return {"message": "Removed from your closet."}
 
 
@@ -374,10 +396,12 @@ def outfit_today(
     occasion: str = "everyday",
     mood: str = "",
     photosOnly: bool = False,
+    avoid: list[str] = Query([]),
 ):
     """Recommend an outfit using the closet, local weather and your mood.
 
     Set photosOnly=true to choose only items with available photos.
+    Pass avoid=top_01,bottoms_02 (repeatable) for outfits already shown, so Restyle picks a new one.
     """
     closet = owned_closet(photos_only=photosOnly)
 
@@ -393,10 +417,19 @@ def outfit_today(
         city or env("DEFAULT_CITY", "Seattle")
     )
 
+    prefs = preferences(occasion[:200], weather, mood=mood[:100])
+    closet_ids = {item["id"] for item in closet}
+    previous = [
+        [item_id for item_id in outfit.split(",") if item_id in closet_ids]
+        for outfit in avoid[-5:]
+    ]
+    if any(previous):
+        prefs["previousOutfits"] = [ids for ids in previous if ids]
+
     try:
         result = today_outfit(
             closet,
-            preferences(occasion[:200], weather, mood=mood[:100]),
+            prefs,
             env("GEMINI_API_KEY"),
             env("GEMINI_TEXT_MODEL"),
         )
@@ -421,6 +454,89 @@ def outfit_today(
         "weather": weather,
         "weatherError": weather_error,
     }
+
+
+# ---------- Sample outfits for the home page closet ----------
+
+SAMPLE_OCCASIONS = ("everyday", "work", "weekend")
+SAMPLES_VERSION = 3 # bump to rebuild saved samples after changing how they are picked
+SAMPLES_LOCK = asyncio.Lock()
+
+
+def closet_fingerprint(closet, style):
+    """Changes whenever an item is added, removed or edited, or the style changes."""
+    text = json.dumps(
+        {"closet": closet, "style": style, "version": SAMPLES_VERSION},
+        sort_keys=True,
+    )
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+@api.get("/outfit/samples")
+async def outfit_samples():
+    """One sample outfit each for everyday, work and weekend.
+
+    Results are saved and reused until the closet or style changes,
+    so the home page only asks Gemini again after you update your closet.
+    An empty closet returns no samples.
+    """
+    closet = owned_closet()
+    if not closet:
+        return {"samples": []}
+
+    async with SAMPLES_LOCK:  # two page loads at once share one Gemini run
+        fingerprint = closet_fingerprint(
+            closet, database.get_setting("style", DEFAULT_STYLE)
+        )
+        try:
+            saved = json.loads(database.get_setting("sample_outfits", "{}"))
+        except json.JSONDecodeError:
+            saved = {}
+
+        if saved.get("fingerprint") != fingerprint:
+            # Picked one after another so each sample avoids the earlier ones.
+            results = []
+            for occasion in SAMPLE_OCCASIONS:
+                prefs = preferences(
+                    occasion,
+                    None,
+                    notes="A general sample outfit, not for a specific day: "
+                    "ignore the weather and do not mention it in cautions.",
+                )
+                earlier = [r["itemIds"] for r in results if r.get("itemIds")]
+                if earlier:
+                    prefs["previousOutfits"] = earlier
+                try:
+                    result = await run_in_threadpool(
+                        today_outfit,
+                        closet,
+                        prefs,
+                        env("GEMINI_API_KEY"),
+                        env("GEMINI_TEXT_MODEL"),
+                    )
+                except (ValueError, RuntimeError) as exc:
+                    result = {"error": redact(str(exc))}
+                results.append(result)
+            saved = {
+                "fingerprint": fingerprint,
+                "outfits": dict(zip(SAMPLE_OCCASIONS, results)),
+            }
+            # Keep failed runs out of the cache so the next visit tries again.
+            if not any("error" in result for result in results):
+                database.set_setting("sample_outfits", json.dumps(saved))
+
+    samples = []
+    for occasion in SAMPLE_OCCASIONS:
+        outfit = saved["outfits"][occasion]
+        items = [database.get_item(item_id) for item_id in outfit.get("itemIds", [])]
+        samples.append({
+            "occasion": occasion,
+            "outfit": outfit if "error" not in outfit else None,
+            "error": outfit.get("error"),
+            "items": [with_image_url(item) for item in items if item],
+        })
+
+    return {"samples": samples}
 
 
 # ---------- Outfit images ----------
@@ -659,6 +775,8 @@ async def buy_or_bye(
                 env("GEMINI_API_KEY"),
                 env("GEMINI_TEXT_MODEL"),
             )
+            # A JPEG copy for the results page: browsers cannot show HEIC photos.
+            photo = await run_in_threadpool(prepare_image, path)
 
         candidate = {
             "id": "candidate_check",
@@ -761,7 +879,22 @@ async def buy_or_bye(
         "outfits": result["outfits"],
         "style": style,
         "styleReview": style_review,
+        "imageUrl": "data:image/jpeg;base64," + base64.b64encode(photo).decode("ascii"),
     }
+
+
+# ---------- Feedback ----------
+
+class FeedbackRequest(BaseModel):
+    rating: int = Field(..., ge=1, le=5)
+    message: str = Field("", max_length=2000)
+
+
+@api.post("/feedback")
+def save_feedback(body: FeedbackRequest):
+    """Save a 1–5 heart rating and an optional comment in wardrobe.db."""
+    database.add_feedback(body.rating, body.message.strip())
+    return {"message": "Your feedback has been saved."}
 
 
 # ---------- Register routes and serve images ----------

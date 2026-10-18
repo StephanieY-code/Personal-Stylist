@@ -24,5 +24,7 @@ BACKEND_PID=$!
 trap 'kill $BACKEND_PID 2>/dev/null' EXIT
 
 cd "Peak Style Personal Stylist"
-[ -d node_modules ] || pnpm install
-pnpm dev
+# Use pnpm if installed, otherwise run it through npx (no global install needed).
+if command -v pnpm >/dev/null 2>&1; then PNPM=pnpm; else PNPM="npx --yes pnpm"; fi
+[ -d node_modules ] || $PNPM install
+$PNPM dev

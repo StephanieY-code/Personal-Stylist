@@ -106,12 +106,15 @@ export default function OutfitPlanner() {
   const [showing, setShowing] = useState<"model" | "me">("model")
   // Each styling run gets a number so late answers from an older run are ignored.
   const runRef = useRef(0)
+  // Outfits already shown for these answers, so Restyle asks for a different one.
+  const shownRef = useRef<string[][]>([])
 
   const answer = (field: keyof Answers) => (value: string) =>
     setAnswers((current) => ({ ...current, [field]: value }))
 
-  const styleOutfit = async () => {
+  const styleOutfit = async (restyle = false) => {
     const run = ++runRef.current
+    if (!restyle) shownRef.current = []
     const { city, occasion, mood } = answers
     setStep("result")
     window.scrollTo(0, 0)
@@ -128,6 +131,7 @@ export default function OutfitPlanner() {
     let result: OutfitResponse
     try {
       const params = new URLSearchParams({ city, occasion, mood })
+      for (const ids of shownRef.current) params.append("avoid", ids.join(","))
       result = await apiRequest<OutfitResponse>(`/outfit/today?${params}`)
     } catch (error) {
       if (run === runRef.current) {
@@ -145,6 +149,7 @@ export default function OutfitPlanner() {
       setStatus({ kind: "error", message: result.outfit.reason })
       return
     }
+    shownRef.current = [...shownRef.current, result.outfit.itemIds].slice(-5)
     setStatus(initialStatus)
     setModelLook({
       status: {
@@ -411,7 +416,7 @@ export default function OutfitPlanner() {
               />
             </label>
           )}
-          <button type="button" onClick={() => void styleOutfit()} disabled={busy}>
+          <button type="button" onClick={() => void styleOutfit(true)} disabled={busy}>
             Restyle
           </button>
           <button type="button" className="is-quiet" onClick={editAnswers}>

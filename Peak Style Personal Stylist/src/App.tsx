@@ -16,7 +16,10 @@ import {
   mediaUrl,
   Status,
 } from "./api"
+import Feedback from "./Feedback"
+import HeroArt from "./HeroArt"
 import OutfitPlanner from "./OutfitPlanner"
+import SampleOutfits from "./SampleOutfits"
 import StyleChat from "./StyleChat"
 
 type ClosetResponse = { items: ClosetItem[] }
@@ -30,6 +33,8 @@ type AnalysisResponse = {
   item: { category: string; color: string; description: string }
   outfits: { id: string; reason: string; cautions: string[]; items: ClosetItem[] }[]
   style: string
+  /** JPEG copy of the uploaded photo; the original may be HEIC, which browsers can't show. */
+  imageUrl: string
   styleReview: {
     styleMatch: StyleMatch
     styleComment: string
@@ -53,7 +58,7 @@ const MATCH_LABEL: Record<StyleMatch, string> = {
 function BrandMark() {
   return (
     <a className="brand-mark" href="/" aria-label="Peak Style home">
-      <span>PS</span>
+      <img src="/assets/logo.png" alt="" />
     </a>
   )
 }
@@ -126,6 +131,7 @@ function MainExperience() {
         body: data,
       })
       setAnalysis(result)
+      setPreviewUrl(result.imageUrl) // also frees the original file's preview URL
       setStatus({
         kind: "success",
         message: result.message,
@@ -162,7 +168,7 @@ function MainExperience() {
   return (
     <main className="snap-page">
       <section className="art-section hero" aria-labelledby="welcome-title">
-        <img src="/assets/c0fd1.png" alt="" className="slide-art" />
+        <HeroArt />
         <div className="hero-copy">
           <p className="eyebrow">Your personal stylist</p>
           <h1 id="welcome-title">Dress like you, only better.</h1>
@@ -189,11 +195,9 @@ function MainExperience() {
           <p>Scroll in and take a look around.</p>
         </div>
 
-        <div className="closet-reveal" aria-hidden="true">
-          <div className="rail" />
-          <div className="garment garment-one">Everyday</div>
-          <div className="garment garment-two">Work</div>
-          <div className="garment garment-three">Weekend</div>
+        <div className="closet-reveal">
+          <div className="rail" aria-hidden="true" />
+          <SampleOutfits />
         </div>
         <div className="closet-doors" aria-hidden="true">
           <div className="door door-left">
@@ -479,7 +483,7 @@ function UploadCloset() {
               ? `${chosen} photo${chosen === 1 ? "" : "s"} chosen`
               : "Choose clothing photos"}
           </strong>
-          <small>JPG, PNG, or WEBP · up to 10 at a time</small>
+          <small>JPG, PNG, WEBP, or HEIC · up to 20 at a time</small>
         </label>
         <button type="submit" disabled={status.kind === "loading"}>
           Add to my closet
@@ -573,8 +577,12 @@ function StyleProfile() {
       setCurrentStyle(result.style)
       setStatus({
         kind: "success",
-        message: `${result.message} Today’s outfit will follow it.`,
+        message: `${result.message} Taking you to today’s outfit…`,
       })
+      // Show the confirmation for a moment, then open the Today's outfit form.
+      window.setTimeout(() => {
+        window.location.assign("?view=outfit")
+      }, 1200)
     } catch (error) {
       setStatus({
         kind: "error",
@@ -661,6 +669,8 @@ function ToolPage({ view }: { view: string }) {
           <OutfitPlanner />
         ) : view === "style" ? (
           <StyleProfile />
+        ) : view === "feedback" ? (
+          <Feedback />
         ) : (
           <ToolIntro
             kicker="Peak Style"
