@@ -1,28 +1,21 @@
-
-# API keys and secrets
 .env
 .env.*
 !.env.example
 
-# Python
 __pycache__/
 *.pyc
 .venv/
 venv/
 
-# Node.js / React
-node_modules/
-dist/
-build/
-.next/
-
-# macOS
-.DS_Store
-
-# VS Code local settings
-.vscode/
-
-
-#DB
 wardrobe.db
+wardrobe.db-*
 images/
+previews/
+
+/me.png
+/shirt.png
+/shoes.png
+/jeans.png
+/preview.jpg
+
+.DS_Store
